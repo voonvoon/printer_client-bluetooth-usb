@@ -1,0 +1,23 @@
+{
+  "name": "printer_client",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "electron-log": "^5.3.4",
+    "escpos": "^3.0.0-alpha.6",
+    "escpos-usb": "^3.0.0-alpha.4",
+    "iconv-lite": "^0.6.3",
+    "serialport": "^13.0.0",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "electron": "^35.2.1"
+  }
+}
