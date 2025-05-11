@@ -4,8 +4,12 @@
 
 const WebSocket = require("ws");
 const { SerialPort } = require("serialport"); // Explicitly import SerialPort
+const path = require("path");
+const sound = require("sound-play");
 //const list = SerialPort.list;
 //const ws = new WebSocket("http://157.245.192.130:3000/print");
+
+let ws; // Declare WebSocket instance globally to manage it properly
 
 // Define printer settings for Bluetooth connection
 const PRINTER_CONFIG = { path: "COM4", baudRate: 9600 }; // Bluetooth printer settings
@@ -62,7 +66,7 @@ function processNextJob() {
 
 function openPrinterWithRetry(printData, jobId, retries = 0, callback) {
   //for send ack to server after pritning the job. is short-lived and only used for this function.
-  const ws = new WebSocket("http://157.245.192.130:3000/print");
+  //ws = new WebSocket("http://157.245.192.130:3000/print");
 
   const printer = new SerialPort({
     path: PRINTER_CONFIG.path,
@@ -123,21 +127,65 @@ function openPrinterWithRetry(printData, jobId, retries = 0, callback) {
   });
 }
 
+function reconnectWebSocket() {
+  const reconnectInterval = setInterval(() => {
+    console.log("Attempting to reconnect to WebSocket...");
+
+    const newWs = new WebSocket("http://157.245.192.130:3000/print");
+    //const newWs = new WebSocket("http://localhost:3000/print");
+
+    newWs.on("open", () => {
+      console.log("Reconnected to WebSocket server.");
+      clearInterval(reconnectInterval);
+
+      // Assign the new WebSocket instance to the global `ws` variable
+      //ws = newWs;
+
+      // Reinitialize the WebSocket connection logic
+      connectWebSocket();
+
+      // Close the temporary WebSocket instance else will have same port open.
+      newWs.close();
+    });
+
+    newWs.on("error", (err) => {
+      console.error("Reconnection attempt failed:", err.message);
+    });
+  }, 5000); // Try reconnecting every 5 seconds
+}
+
 function connectWebSocket() {
+  if (ws) {
+    // Ensure the old WebSocket is properly closed
+    //ws.removeAllListeners(); // Remove all event listeners
+    ws.close(); // Close the WebSocket connection
+    ws = null; // Clear the reference
+  }
   //create here else re-connect won't works cuz the old one is closed due to internet disconnected.
   //for listening to incoming messages and managing the job queue.
   //maintaining a persistent connection with server to receive print jobs & handle reconnections in case of disconnection.
-  const ws = new WebSocket("http://157.245.192.130:3000/print");
+
+  ws = new WebSocket("http://157.245.192.130:3000/print");
+  //ws = new WebSocket("http://localhost:3000/print");
 
   // When the WebSocket connection is established
   ws.on("open", () => {
     console.log("Connected to the WebSocket server");
     console.log("Waiting for print jobs ...");
+
+    // Notify the server that the client has reconnected
+    ws.send(JSON.stringify({ type: "reconnected" }));
   });
 
   // When a message is received from the server
   ws.on("message", (data) => {
     console.log("Received a print job:", data);
+
+    // Play the notification sound (coin.mp3 in the root folder)
+    const soundPath = path.join(__dirname, "coin.mp3");
+    sound.play(soundPath).catch((err) => {
+      console.error("Error playing sound:", err);
+    });
 
     // Parse the received data to extract the jobId and print data
     let job;
@@ -166,41 +214,30 @@ function connectWebSocket() {
   ws.on("close", (code) => {
     console.log(`WebSocket closed. Code: ${code}`);
 
+    // Ensure the old WebSocket instance is cleaned up
+    if (ws) {
+      ws.close(); // Remove all event listeners from the old WebSocket
+      ws = null; // Clear the reference to the old WebSocket
+    }
+
     // Attempt to reconnect after a delay
-    const reconnectInterval = setInterval(() => {
-      console.log("Attempting to reconnect to WebSocket...");
-
-      //each interval runs need to create a new WebSocket instance (newWs) to attempt reconnection.
-      //newWs in setInterval is temporary & only for check/test if the connection can reached & re-established.
-      const newWs = new WebSocket("http://157.245.192.130:3000/print");
-
-      //Once connection successfully re-established,clear interval to stop further reconnection attempts.
-      newWs.on("open", () => {
-        console.log("Reconnected to WebSocket server.");
-        clearInterval(reconnectInterval);
-
-        //Once connection open need set up proper logic for handling messages, errors, and other events.
-        //So Reinitialize the WebSocket connection logic here.
-        connectWebSocket();
-      });
-
-      newWs.on("error", (err) => {
-        console.error("Reconnection attempt failed:", err.message);
-      });
-    }, 5000); // Try reconnecting every 5 seconds
+    reconnectWebSocket();
   });
 
   //traditionally sent by server, here we are sending it from client to server to workaround the issue of inactivity timeout.
   //else client will be disconnected after 30 seconds of inactivity.
   setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Check if ws is not null
       ws.send(JSON.stringify({ type: "ping" }));
       const currentTime = new Date().toLocaleTimeString(); // Get the current time
       console.log(
         `[${currentTime}] sending ping to server to keep websocket alive!`
-      ); 
+      );
+    } else {
+      console.log("WebSocket is not open. Skipping ping.");
     }
-  }, 30000);
+  }, 20000);
 }
 
 connectWebSocket();
