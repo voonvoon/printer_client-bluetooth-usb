@@ -2,12 +2,17 @@
 // with your Bluetooth printer, allowing you to send print jobs via a specified
 // COM port and baud rate.
 
+//i have solved few issues:
+//1.if internet disconnected, auto reconnect once internet is back.
+//2.if pc domain too long websocket will close, so added reconnect logic once pc wake up.
+//3.all jobs in server side queue will be sent to client once connected for no1. and no2 scenario.
+//4.if printer not connected/power off, it will retry 5 times to find the printer.
+
 const WebSocket = require("ws");
 const { SerialPort } = require("serialport"); // Explicitly import SerialPort
 const path = require("path");
 const sound = require("sound-play");
 //const list = SerialPort.list;
-//const ws = new WebSocket("http://157.245.192.130:3000/print");
 
 let ws; // Declare WebSocket instance globally to manage it properly
 
@@ -65,9 +70,6 @@ function processNextJob() {
 // Function to open the printer with retry logic
 
 function openPrinterWithRetry(printData, jobId, retries = 0, callback) {
-  //for send ack to server after pritning the job. is short-lived and only used for this function.
-  //ws = new WebSocket("http://157.245.192.130:3000/print");
-
   const printer = new SerialPort({
     path: PRINTER_CONFIG.path,
     baudRate: PRINTER_CONFIG.baudRate,
@@ -138,9 +140,6 @@ function reconnectWebSocket() {
       console.log("Reconnected to WebSocket server.");
       clearInterval(reconnectInterval);
 
-      // Assign the new WebSocket instance to the global `ws` variable
-      //ws = newWs;
-
       // Reinitialize the WebSocket connection logic
       connectWebSocket();
 
@@ -157,7 +156,6 @@ function reconnectWebSocket() {
 function connectWebSocket() {
   if (ws) {
     // Ensure the old WebSocket is properly closed
-    //ws.removeAllListeners(); // Remove all event listeners
     ws.close(); // Close the WebSocket connection
     ws = null; // Clear the reference
   }
@@ -173,8 +171,17 @@ function connectWebSocket() {
     console.log("Connected to the WebSocket server");
     console.log("Waiting for print jobs ...");
 
-    // Notify the server that the client has reconnected
-    ws.send(JSON.stringify({ type: "reconnected" }));
+    // Play the notification sound (coin.mp3 in the root folder)
+    const soundPath = path.join(__dirname, "online.mp3");
+    sound.play(soundPath).catch((err) => {
+      console.error("Error playing sound:", err);
+    });
+    //Delay 5 seconds before notifying the server that the client has reconnected
+    //server get the msg will run sendPendingJobs function to send all the pending jobs to client.
+    setTimeout(() => {
+      ws.send(JSON.stringify({ type: "reconnected" }));
+      console.log("Reconnection message sent to the server after 5 seconds.");
+    }, 5000);
   });
 
   // When a message is received from the server
@@ -236,6 +243,11 @@ function connectWebSocket() {
       );
     } else {
       console.log("WebSocket is not open. Skipping ping.");
+      // Play the notification sound (coin.mp3 in the root folder)
+      const soundPath = path.join(__dirname, "alert.mp3");
+      sound.play(soundPath).catch((err) => {
+        console.error("Error playing sound:", err);
+      });
     }
   }, 20000);
 }
